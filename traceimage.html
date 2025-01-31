@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Recoil Script Generator</title>
+    <style>
+        canvas {
+            border: 1px solid black;
+        }
+        .controls {
+            margin-top: 20px;
+        }
+        .grid {
+            position: absolute;
+            top: 0;
+            left: 0;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body>
+    <h1>Recoil Script Generator</h1>
+    <input type="file" id="imageUpload" accept="image/*">
+    <br><br>
+    <div style="position: relative;">
+        <canvas id="canvas" width="1050" height="4230"></canvas>
+        <canvas id="grid" class="grid" width="1050" height="4230"></canvas>
+    </div>
+    <div class="controls">
+        <label for="fireRate">Fire Rate (per minute):</label>
+        <input type="number" id="fireRate" value="1091">
+        <label for="magSize">Mag Size:</label>
+        <input type="number" id="magSize" value="30">
+        <button onclick="generateLuaScript()">Generate Lua Script</button>
+        <button onclick="clearCanvas()">Clear Canvas</button>
+    </div>
+    <br><br>
+    <textarea id="luaScript" rows="20" cols="80" readonly></textarea>
+    <button onclick="downloadScript()">Download Script</button>
+
+    <script>
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas.getContext('2d');
+        const gridCanvas = document.getElementById('grid');
+        const gridCtx = gridCanvas.getContext('2d');
+        const luaScript = document.getElementById('luaScript');
+        const imageUpload = document.getElementById('imageUpload');
+        const fireRateInput = document.getElementById('fireRate');
+        const magSizeInput = document.getElementById('magSize');
+
+        let isDrawing = false;
+        let points = [];
+        let img = null;
+        let scale = 1;
+        let offsetX = 0;
+        let offsetY = 0;
+
+        // Draw grid
+        function drawGrid() {
+            gridCtx.clearRect(0, 0, gridCanvas.width, gridCanvas.height);
+            gridCtx.strokeStyle = 'rgba(0, 0, 0, 0.1)';
+            gridCtx.lineWidth = 1;
+            for (let x = 0; x <= gridCanvas.width; x += 50) {
+                gridCtx.beginPath();
+                gridCtx.moveTo(x, 0);
+                gridCtx.lineTo(x, gridCanvas.height);
+                gridCtx.stroke();
+            }
+            for (let y = 0; y <= gridCanvas.height; y += 50) {
+                gridCtx.beginPath();
+                gridCtx.moveTo(0, y);
+                gridCtx.lineTo(gridCanvas.width, y);
+                gridCtx.stroke();
+            }
+        }
+
+        // Load image onto canvas
+        imageUpload.addEventListener('change', (e) => {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = (event) => {
+                img = new Image();
+                img.src = event.target.result;
+                img.onload = () => {
+                    // Calculate scale to fit image within canvas
+                    scale = Math.min(canvas.width / img.width, canvas.height / img.height);
+                    offsetX = (canvas.width - img.width * scale) / 2;
+                    offsetY = (canvas.height - img.height * scale) / 2;
+                    ctx.clearRect(0, 0, canvas.width, canvas.height);
+                    ctx.drawImage(img, offsetX, offsetY, img.width * scale, img.height * scale);
+                    drawGrid();
+                };
+            };
+            reader.readAsDataURL(file);
+        });
+
+        // Start drawing
+        canvas.addEventListener('mousedown', (e) => {
+            isDrawing = true;
+            points = [];
+        });
+
+        // Record points while drawing
+        canvas.addEventListener('mousemove', (e) => {
+            if (isDrawing) {
+                const rect = canvas.getBoundingClientRect();
+                const x = (e.clientX - rect.left - offsetX) / scale;
+                const y = (e.clientY - rect.top - offsetY) / scale;
+                points.push({ x, y });
+                ctx.beginPath();
+                ctx.arc(x * scale + offsetX, y * scale + offsetY, 2, 0, Math.PI * 2);
+                ctx.fillStyle = 'red'; // Trace in red
+                ctx.fill();
+            }
+        });
+
+        // Stop drawing
+        canvas.addEventListener('mouseup', () => {
+            isDrawing = false;
+            console.log("Points recorded:", points); // Debugging
+        });
+
+        // Clear canvas
+        function clearCanvas() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            if (img) {
+                ctx.drawImage(img, offsetX, offsetY, img.width * scale, img.height * scale);
+            }
+            drawGrid();
+            points = [];
+            luaScript.value = ""; // Clear the script
+        }
+
+        // Generate Lua script from traced points
+        function generateLuaScript() {
+            if (points.length === 0) {
+                alert("Please trace a gesture first!");
+                return;
+            }
+
+            const fireRate = parseInt(fireRateInput.value);
+            const magSize = parseInt(magSizeInput.value);
+            const loopDelay = Math.round((60 / fireRate) * 1000); // Convert fire rate to loop delay
+
+            let script = `local verticalGestureStrengthHigh = 4\n`;
+            script += `local verticalGestureStrengthMedium = 3\n`;
+            script += `local horizontalGestureStrengthLeft = -2\n`;
+            script += `local horizontalGestureDuration = 2480\n`;
+            script += `local loopDelay = ${loopDelay}\n\n`;
+
+            script += `function OnEvent(event, arg)\n`;
+            script += `    if event == "PROFILE_ACTIVATED" then\n`;
+            script += `        EnablePrimaryMouseButtonEvents(true)\n`;
+            script += `    end\n\n`;
+
+            script += `    if event == "MOUSE_BUTTON_PRESSED" and arg == 1 and IsMouseButtonPressed(3) then\n`;
+            script += `        local startTime = GetRunningTime()\n`;
+            script += `        repeat\n`;
+            script += `            local currentTime = GetRunningTime() - startTime\n`;
+            script += `            if currentTime < 600 then\n`;
+            script += `                MoveMouseRelative(0, verticalGestureStrengthHigh)\n`;
+            script += `            else\n`;
+            script += `                MoveMouseRelative(0, verticalGestureStrengthMedium)\n`;
+            script += `            end\n`;
+            script += `            if currentTime >= 0 and currentTime < horizontalGestureDuration then\n`;
+            script += `                MoveMouseRelative(horizontalGestureStrengthLeft, 0)\n`;
+            script += `            end\n`;
+            script += `            Sleep(loopDelay)\n`;
+            script += `        until not (IsMouseButtonPressed(1) and IsMouseButtonPressed(3))\n`;
+            script += `    end\n`;
+            script += `end\n`;
+
+            console.log("Generated script:", script); // Debugging
+            luaScript.value = script;
+        }
+
+        // Download the generated script
+        function downloadScript() {
+            const script = luaScript.value;
+            if (!script) {
+                alert("No script to download!");
+                return;
+            }
+
+            const blob = new Blob([script], { type: 'text/plain' });
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'recoil_script.lua';
+            a.click();
+            URL.revokeObjectURL(url);
+        }
+
+        // Draw grid initially
+        drawGrid();
+    </script>
+</body>
+</html>
